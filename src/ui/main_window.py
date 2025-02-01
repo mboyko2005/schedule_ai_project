@@ -50,6 +50,9 @@ class MainWindow:
         btn_absence = ttk.Button(control_frame, text="Указать отсутствие преподавателя", command=self.set_teacher_absence)
         btn_absence.grid(row=0, column=6, padx=5, pady=5)
 
+        btn_show_absences = ttk.Button(control_frame, text="Просмотр отсутствий", command=self.show_teacher_absences)
+        btn_show_absences.grid(row=0, column=7, padx=5, pady=5)
+
         btn_delete_teacher = ttk.Button(control_frame, text="Удалить преподавателя", command=self.delete_teacher)
         btn_delete_teacher.grid(row=1, column=0, padx=5, pady=5)
 
@@ -145,59 +148,108 @@ class MainWindow:
             return
         filename = filedialog.asksaveasfilename(defaultextension=".xlsx", filetypes=[("Excel files", "*.xlsx")])
         if filename:
-            export_schedule_to_excel(self.current_schedule, filename)
+            export_schedule_to_excel(self.current_schedule, self.groups, filename)
             messagebox.showinfo("Успех", f"Расписание сохранено в {filename}")
 
     def open_assignment_window(self):
         AssignmentWindow(self.root, self.teachers, self.groups)
 
     def set_teacher_absence(self):
-        teacher_str = simpledialog.askstring("Отсутствие преподавателя", "Введите ID преподавателя:")
-        if not teacher_str:
-            return
-        try:
-            teacher_id = int(teacher_str)
-        except ValueError:
-            messagebox.showerror("Ошибка", "Некорректный ID!")
-            return
-        teacher = next((t for t in self.teachers if t.id == teacher_id), None)
-        if not teacher:
-            messagebox.showerror("Ошибка", "Преподаватель не найден!")
-            return
-        absence_type = simpledialog.askstring("Тип отсутствия", "Введите тип отсутствия: 1 - один день, 2 - неделя:")
-        if absence_type not in ["1", "2"]:
-            messagebox.showerror("Ошибка", "Некорректный тип отсутствия!")
-            return
-        if absence_type == "1":
-            day = simpledialog.askstring("Отсутствие", "Введите день (например, Понедельник):")
-            if not day:
+        # Окно выбора преподавателя из списка.
+        win = tk.Toplevel(self.root)
+        win.title("Выбор преподавателя для отсутствия")
+        tk.Label(win, text="Выберите преподавателя:").pack(padx=10, pady=5)
+        lb = tk.Listbox(win, width=50, font=("Helvetica", 10))
+        for t in self.teachers:
+            lb.insert(tk.END, f"{t.id}: {t.name}")
+        lb.pack(padx=10, pady=5)
+        def select_teacher():
+            selection = lb.curselection()
+            if not selection:
+                messagebox.showerror("Ошибка", "Выберите преподавателя!")
                 return
-            pairs_str = simpledialog.askstring("Отсутствие", "Введите номера пар через запятую (например, 1,2,3):")
-            if not pairs_str:
+            index = selection[0]
+            selected_teacher = self.teachers[index]
+            win.destroy()
+            # Открываем окно для задания отсутствия.
+            absence_win = tk.Toplevel(self.root)
+            absence_win.title("Задание отсутствия")
+            tk.Label(absence_win, text=f"Преподаватель: {selected_teacher.name}").grid(row=0, column=0, columnspan=2, padx=10, pady=5)
+            tk.Label(absence_win, text="Тип отсутствия:").grid(row=1, column=0, sticky="w", padx=10, pady=5)
+            absence_type_var = tk.StringVar(value="1")
+            absence_type_menu = ttk.Combobox(absence_win, textvariable=absence_type_var, state="readonly",
+                                             values=["1 - один день", "2 - неделя"])
+            absence_type_menu.grid(row=1, column=1, padx=10, pady=5)
+            tk.Label(absence_win, text="Если один день, укажите день:").grid(row=2, column=0, sticky="w", padx=10, pady=5)
+            day_entry = ttk.Entry(absence_win)
+            day_entry.grid(row=2, column=1, padx=10, pady=5)
+            tk.Label(absence_win, text="Введите номера пар через запятую:").grid(row=3, column=0, sticky="w", padx=10, pady=5)
+            pairs_entry = ttk.Entry(absence_win)
+            pairs_entry.grid(row=3, column=1, padx=10, pady=5)
+            def save_absence():
+                atype = absence_type_var.get()[0]  # "1" или "2"
+                pairs_str = pairs_entry.get().strip()
+                if not pairs_str:
+                    messagebox.showerror("Ошибка", "Введите номера пар!")
+                    return
+                try:
+                    pairs = [int(p.strip()) for p in pairs_str.split(",")]
+                except ValueError:
+                    messagebox.showerror("Ошибка", "Неверный формат номеров пар!")
+                    return
+                if atype == "1":
+                    day = day_entry.get().strip()
+                    if not day:
+                        messagebox.showerror("Ошибка", "Введите день!")
+                        return
+                    selected_teacher.absences[day] = pairs
+                    save_teachers(self.teachers)
+                    messagebox.showinfo("Информация", f"Для преподавателя {selected_teacher.name} установлено отсутствие в день {day} на пары: {pairs}")
+                else:
+                    days = ["Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота"]
+                    for d in days:
+                        selected_teacher.absences[d] = pairs
+                    save_teachers(self.teachers)
+                    messagebox.showinfo("Информация", f"Для преподавателя {selected_teacher.name} установлено отсутствие на всю неделю на пары: {pairs}")
+                absence_win.destroy()
+            btn_save = ttk.Button(absence_win, text="Сохранить отсутствие", command=save_absence)
+            btn_save.grid(row=4, column=0, columnspan=2, padx=10, pady=10)
+        btn_select = ttk.Button(win, text="Выбрать", command=select_teacher)
+        btn_select.pack(padx=10, pady=10)
+    def show_teacher_absences(self):
+        # Открываем окно, где отображаются записи об отсутствиях преподавателей.
+        win = tk.Toplevel(self.root)
+        win.title("Отсутствия преподавателей")
+        tree = ttk.Treeview(win, columns=("Teacher", "День", "Пары"), show="headings")
+        tree.heading("Teacher", text="Преподаватель")
+        tree.heading("День", text="День")
+        tree.heading("Пары", text="Пары")
+        tree.column("Teacher", width=150, anchor="center")
+        tree.column("День", width=100, anchor="center")
+        tree.column("Пары", width=150, anchor="center")
+        tree.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        for teacher in self.teachers:
+            if teacher.absences:
+                for day, pairs in teacher.absences.items():
+                    tree.insert("", tk.END, values=(teacher.name, day, ", ".join(map(str, pairs))))
+        def delete_absence():
+            selected = tree.selection()
+            if not selected:
+                messagebox.showerror("Ошибка", "Выберите запись для удаления!")
                 return
-            try:
-                pairs = [int(p.strip()) for p in pairs_str.split(",")]
-            except ValueError:
-                messagebox.showerror("Ошибка", "Неверный формат номеров пар!")
-                return
-            teacher.absences[day] = pairs
-            save_teachers(self.teachers)
-            messagebox.showinfo("Информация", f"Для преподавателя {teacher.name} установлено отсутствие в день {day} на пары: {pairs}")
-        else:  # Отсутствие на всю неделю
-            pairs_str = simpledialog.askstring("Отсутствие", "Введите номера пар через запятую (например, 1,2,3) для отсутствия на всю неделю:")
-            if not pairs_str:
-                return
-            try:
-                pairs = [int(p.strip()) for p in pairs_str.split(",")]
-            except ValueError:
-                messagebox.showerror("Ошибка", "Неверный формат номеров пар!")
-                return
-            days = ["Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота"]
-            for d in days:
-                teacher.absences[d] = pairs
-            save_teachers(self.teachers)
-            messagebox.showinfo("Информация", f"Для преподавателя {teacher.name} установлено отсутствие на всю неделю на пары: {pairs}")
-
+            item = selected[0]
+            values = tree.item(item, "values")
+            teacher_name, day, _ = values
+            for teacher in self.teachers:
+                if teacher.name == teacher_name:
+                    if day in teacher.absences:
+                        del teacher.absences[day]
+                        save_teachers(self.teachers)
+                        tree.delete(item)
+                        messagebox.showinfo("Информация", f"Запись об отсутствии для {teacher_name} в день {day} удалена.")
+                    break
+        btn_del = ttk.Button(win, text="Удалить выбранную запись", command=delete_absence)
+        btn_del.pack(padx=10, pady=10)
     def delete_teacher(self):
         win = tk.Toplevel(self.root)
         win.title("Удалить преподавателя")
@@ -217,7 +269,6 @@ class MainWindow:
             messagebox.showinfo("Информация", f"Удалён: {teacher}")
         btn = ttk.Button(win, text="Удалить выбранного", command=do_delete)
         btn.pack(padx=10, pady=10)
-
     def delete_group(self):
         win = tk.Toplevel(self.root)
         win.title("Удалить группу")
@@ -237,7 +288,6 @@ class MainWindow:
             messagebox.showinfo("Информация", f"Удалена: {group}")
         btn = ttk.Button(win, text="Удалить выбранную", command=do_delete)
         btn.pack(padx=10, pady=10)
-
     def delete_room(self):
         win = tk.Toplevel(self.root)
         win.title("Удалить аудиторию")
@@ -257,7 +307,6 @@ class MainWindow:
             messagebox.showinfo("Информация", f"Удалена: {room}")
         btn = ttk.Button(win, text="Удалить выбранную", command=do_delete)
         btn.pack(padx=10, pady=10)
-
     def show_all_rooms(self):
         win = tk.Toplevel(self.root)
         win.title("Список аудиторий")
